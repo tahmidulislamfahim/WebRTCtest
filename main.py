@@ -199,7 +199,7 @@ async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
                     "declinerId": user_id
                 })
 
-            elif msg_type in ["offer", "answer", "ice_candidate"]:
+            elif msg_type in ["offer", "answer", "ice_candidate", "end_call"]:
                 if target_user_id:
                     await manager.send_to_user(target_user_id, data)
                 elif data.get("roomId"):
@@ -225,7 +225,7 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str, peer_id: s
             data["senderId"] = peer_id
             data["roomId"] = room_id
 
-            if msg_type in ["offer", "answer", "ice_candidate"]:
+            if msg_type in ["offer", "answer", "ice_candidate", "end_call"]:
                 if target_id:
                     await manager.send_to_peer(room_id, target_id, data)
                 else:
