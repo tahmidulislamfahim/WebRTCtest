@@ -160,8 +160,12 @@ async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
-            target_user_id = data.get("targetUserId")
 
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+
+            target_user_id = data.get("targetUserId")
             data["senderId"] = user_id
 
             logger.info(f"User WebSocket message '{msg_type}' from user '{user_id}' to target '{target_user_id}'")
@@ -220,8 +224,12 @@ async def room_websocket_endpoint(websocket: WebSocket, room_id: str, peer_id: s
         while True:
             data = await websocket.receive_json()
             msg_type = data.get("type")
-            target_id = data.get("targetId")
 
+            if msg_type == "ping":
+                await websocket.send_json({"type": "pong"})
+                continue
+
+            target_id = data.get("targetId")
             data["senderId"] = peer_id
             data["roomId"] = room_id
 
