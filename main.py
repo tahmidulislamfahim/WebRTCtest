@@ -22,7 +22,9 @@ logger = logging.getLogger("webrtc_signaling")
 app = FastAPI(
     title="WebRTC Signaling & JWT Auth Server",
     description="FastAPI WebRTC Signaling Server with JWT Auth, User Directory & Direct Calling",
-    version="2.1.0"
+    version="2.1.0",
+    docs_url="/docs",
+    openapi_url="/openapi.json"
 )
 
 app.add_middleware(
