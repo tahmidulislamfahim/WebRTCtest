@@ -22,6 +22,15 @@ def init_db():
     conn.commit()
     conn.close()
 
+def clear_all_users():
+    """Deletes all users from the SQLite database."""
+    init_db()
+    conn = sqlite3.connect(DB_FILE)
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM users")
+    conn.commit()
+    conn.close()
+
 def _hash_password(password: str) -> str:
     """Hashes a password using SHA-256."""
     return hashlib.sha256(password.encode('utf-8')).hexdigest()
