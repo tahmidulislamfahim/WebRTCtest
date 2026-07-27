@@ -375,30 +375,36 @@
     let currentTargetUserId = null;
     let iceCandidatesBuffer = [];
 
-    const rtcConfig = {
+    // Dynamic ICE config - fetched from backend /api/ice-servers
+    let rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
-        { urls: 'stun:stun2.l.google.com:19302' },
-        { urls: 'stun:stun3.l.google.com:19302' },
-        { urls: 'stun:stun4.l.google.com:19302' },
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelay',
-          credential: 'openrelay'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelay',
-          credential: 'openrelay'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelay',
-          credential: 'openrelay'
-        }
       ]
     };
+
+    // Fetch working TURN servers from backend on page load
+    async function fetchIceServers() {
+      try {
+        const res = await fetch('/api/ice-servers');
+        const data = await res.json();
+        if (data.iceServers && data.iceServers.length > 0) {
+          rtcConfig = { iceServers: data.iceServers };
+          log(`ICE servers loaded (source: ${data.source}, ${data.iceServers.length} servers)`, 'success');
+          const turnCount = data.iceServers.filter(s => s.urls && s.urls.startsWith('turn')).length;
+          if (turnCount === 0) {
+            log('⚠️ WARNING: No TURN servers configured! Cross-network calls will fail.', 'error');
+          } else {
+            log(`✅ ${turnCount} TURN relay server(s) available for cross-network calls`, 'success');
+          }
+        }
+      } catch (e) {
+        log('Failed to fetch ICE servers from backend: ' + e.message, 'error');
+      }
+    }
+
+    // Fetch ICE servers immediately on page load
+    fetchIceServers();
 
     function log(msg, type = 'info') {
       const consoleEl = document.getElementById('logConsole');

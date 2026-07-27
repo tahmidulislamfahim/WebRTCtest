@@ -6,6 +6,7 @@ from fastapi import FastAPI, WebSocket, WebSocketDisconnect, HTTPException, stat
 from fastapi.responses import HTMLResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
+import httpx
 
 from connection_manager import ConnectionManager
 import database
@@ -22,7 +23,7 @@ logger = logging.getLogger("webrtc_signaling")
 app = FastAPI(
     title="WebRTC Signaling & JWT Auth Server",
     description="FastAPI WebRTC Signaling Server with JWT Auth, User Directory & Direct Calling",
-    version="2.1.0",
+    version="2.2.0",
     docs_url="/docs",
     openapi_url="/openapi.json"
 )
@@ -41,6 +42,67 @@ security = HTTPBearer()
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
+# --- TURN Server Configuration ---
+METERED_API_KEY = os.environ.get("METERED_API_KEY", "9O3NKMsFhnNbF5PWaFNOImTl3Zkox43toP-OunQsEU2091jE")
+METERED_DOMAIN = os.environ.get("METERED_DOMAIN", "webrtctst")
+
+# Manual TURN fallback (pipe-separated for multiple URLs)
+TURN_URLS = os.environ.get("TURN_URLS", "")
+TURN_USERNAME = os.environ.get("TURN_USERNAME", "")
+TURN_CREDENTIAL = os.environ.get("TURN_CREDENTIAL", "")
+
+_cached_metered_servers = None
+_cached_metered_timestamp = 0
+
+STUN_SERVERS = [
+    {"urls": "stun:stun.l.google.com:19302"},
+    {"urls": "stun:stun1.l.google.com:19302"},
+    {"urls": "stun:stun2.l.google.com:19302"},
+    {"urls": "stun:stun3.l.google.com:19302"},
+    {"urls": "stun:stun4.l.google.com:19302"},
+]
+
+
+async def _fetch_metered_turn_servers():
+    """Fetch temporary TURN credentials from Metered.ca free API."""
+    import time
+    global _cached_metered_servers, _cached_metered_timestamp
+
+    now = time.time()
+    if _cached_metered_servers and (now - _cached_metered_timestamp) < 21600:
+        return _cached_metered_servers
+
+    try:
+        url = f"https://{METERED_DOMAIN}.metered.live/api/v1/turn/credentials?apiKey={METERED_API_KEY}"
+        async with httpx.AsyncClient(timeout=10.0) as client:
+            resp = await client.get(url)
+            resp.raise_for_status()
+            servers = resp.json()
+            logger.info(f"Fetched {len(servers)} TURN servers from Metered.ca")
+            _cached_metered_servers = servers
+            _cached_metered_timestamp = now
+            return servers
+    except Exception as e:
+        logger.error(f"Failed to fetch Metered TURN servers: {e}")
+        return _cached_metered_servers or []
+
+
+def _get_manual_turn_servers():
+    """Build TURN server list from manual environment variables."""
+    if not TURN_URLS or not TURN_USERNAME or not TURN_CREDENTIAL:
+        return []
+
+    urls = [u.strip() for u in TURN_URLS.split("|") if u.strip()]
+    return [
+        {
+            "urls": url,
+            "username": TURN_USERNAME,
+            "credential": TURN_CREDENTIAL,
+        }
+        for url in urls
+    ]
+
+
 # --- REST Endpoints ---
 
 @app.get("/")
@@ -52,15 +114,42 @@ async def root():
             "register": "POST /api/register",
             "login": "POST /api/login",
             "users": "GET /api/users (Protected with Bearer JWT Token)",
+            "ice_servers": "GET /api/ice-servers",
             "user_websocket": "WS /ws/user/{user_id}",
             "room_websocket": "WS /ws/{room_id}/{peer_id}",
             "test_client": "GET /test"
         }
     }
 
+
+@app.get("/api/ice-servers")
+async def get_ice_servers():
+    """
+    Returns ICE server configuration (STUN + TURN) for WebRTC clients.
+    TURN servers are sourced from Metered.ca API or manual env vars.
+    """
+    ice_servers = list(STUN_SERVERS)
+
+    if METERED_API_KEY:
+        metered_servers = await _fetch_metered_turn_servers()
+        if metered_servers:
+            ice_servers.extend(metered_servers)
+            return {"iceServers": ice_servers, "source": "metered"}
+
+    manual_servers = _get_manual_turn_servers()
+    if manual_servers:
+        ice_servers.extend(manual_servers)
+        return {"iceServers": ice_servers, "source": "manual"}
+
+    logger.warning(
+        "No TURN servers configured! Cross-network calls will fail. "
+        "Set METERED_API_KEY or TURN_URLS/TURN_USERNAME/TURN_CREDENTIAL env vars."
+    )
+    return {"iceServers": ice_servers, "source": "stun_only"}
+
+
 @app.post("/api/register", response_model=AuthResponse)
 async def register(req: RegisterRequest):
-    """Registers a new user account and returns a JWT access token."""
     user = database.register_user(req.username, req.password, req.display_name)
     if not user:
         raise HTTPException(
@@ -85,7 +174,6 @@ async def register(req: RegisterRequest):
 
 @app.post("/api/login", response_model=AuthResponse)
 async def login(req: LoginRequest):
-    """Authenticates user and returns a signed JWT access token."""
     user = database.authenticate_user(req.username, req.password)
     if not user:
         raise HTTPException(
@@ -110,10 +198,6 @@ async def login(req: LoginRequest):
 
 @app.get("/api/users", response_model=UsersListResponse)
 async def list_users(auth_header: HTTPAuthorizationCredentials = Depends(security)):
-    """
-    Returns list of all registered users EXCEPT the currently authenticated user.
-    PROTECTED: Requires Bearer JWT Token in Authorization header.
-    """
     token = auth_header.credentials
     payload = auth.decode_access_token(token)
     current_user_id = payload.get("sub")
@@ -133,7 +217,6 @@ async def list_users(auth_header: HTTPAuthorizationCredentials = Depends(securit
 
 @app.get("/rooms")
 async def get_rooms():
-    """Returns active rooms summary."""
     return {
         "active_rooms": manager.get_rooms_summary(),
         "online_users": manager.get_online_user_ids()
@@ -141,7 +224,6 @@ async def get_rooms():
 
 @app.get("/test", response_class=HTMLResponse)
 async def get_test_client():
-    """Serves WebRTC test page."""
     test_page_path = os.path.join(STATIC_DIR, "index.html")
     if os.path.exists(test_page_path):
         return FileResponse(test_page_path)
@@ -151,10 +233,6 @@ async def get_test_client():
 
 @app.websocket("/ws/user/{user_id}")
 async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
-    """
-    WebSocket connection for registered users.
-    Handles online status, incoming call alerts, and direct WebRTC signaling.
-    """
     await manager.connect_user(websocket, user_id)
     try:
         while True:
@@ -218,7 +296,6 @@ async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
 
 @app.websocket("/ws/{room_id}/{peer_id}")
 async def room_websocket_endpoint(websocket: WebSocket, room_id: str, peer_id: str):
-    """Room-based WebRTC signaling endpoint for general room testing."""
     await manager.connect_room(websocket, room_id, peer_id)
     try:
         while True:
