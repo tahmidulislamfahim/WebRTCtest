@@ -77,7 +77,8 @@ async def get_turn_credentials():
             {"urls": "turn:openrelay.metered.ca:443", "username": "openrelay", "credential": "openrelay"},
             {"urls": "turn:openrelay.metered.ca:443?transport=tcp", "username": "openrelay", "credential": "openrelay"},
             {"urls": "turns:openrelay.metered.ca:443?transport=tcp", "username": "openrelay", "credential": "openrelay"}
-        ]
+        ],
+        "iceCandidatePoolSize": 10
     }
 
 @app.post("/api/register", response_model=AuthResponse)

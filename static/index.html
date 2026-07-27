@@ -375,30 +375,35 @@
     let currentTargetUserId = null;
     let iceCandidatesBuffer = [];
 
-    const rtcConfig = {
+    let rtcConfig = {
       iceServers: [
         { urls: 'stun:stun.l.google.com:19302' },
         { urls: 'stun:stun1.l.google.com:19302' },
         { urls: 'stun:stun2.l.google.com:19302' },
         { urls: 'stun:stun3.l.google.com:19302' },
         { urls: 'stun:stun4.l.google.com:19302' },
-        {
-          urls: 'turn:openrelay.metered.ca:80',
-          username: 'openrelay',
-          credential: 'openrelay'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443',
-          username: 'openrelay',
-          credential: 'openrelay'
-        },
-        {
-          urls: 'turn:openrelay.metered.ca:443?transport=tcp',
-          username: 'openrelay',
-          credential: 'openrelay'
-        }
-      ]
+        { urls: 'turn:openrelay.metered.ca:80', username: 'openrelay', credential: 'openrelay' },
+        { urls: 'turn:openrelay.metered.ca:443', username: 'openrelay', credential: 'openrelay' },
+        { urls: 'turn:openrelay.metered.ca:443?transport=tcp', username: 'openrelay', credential: 'openrelay' },
+        { urls: 'turns:openrelay.metered.ca:443?transport=tcp', username: 'openrelay', credential: 'openrelay' }
+      ],
+      iceCandidatePoolSize: 10
     };
+
+    async function loadTurnCredentials() {
+      try {
+        const res = await fetch('/api/turn-credentials');
+        if (res.ok) {
+          const config = await res.json();
+          if (config && config.iceServers) {
+            rtcConfig = config;
+            log('Fetched dynamic TURN credentials from backend API', 'success');
+          }
+        }
+      } catch (e) {
+        log('Using default TURN configuration', 'info');
+      }
+    }
 
     function log(msg, type = 'info') {
       const consoleEl = document.getElementById('logConsole');
@@ -451,6 +456,7 @@
         document.getElementById('userProfileBadge').textContent = `👤 ${currentUser.display_name} (@${currentUser.username})`;
         log(`Logged in as '${currentUser.display_name}'. JWT Token acquired!`, 'success');
 
+        await loadTurnCredentials();
         connectUserWebSocket();
         fetchUsers();
         setInterval(fetchUsers, 5000);
@@ -728,6 +734,14 @@
             candidate: event.candidate
           }));
         }
+      };
+
+      peerConnection.oniceconnectionstatechange = () => {
+        log(`ICE Connection State: ${peerConnection.iceConnectionState}`, peerConnection.iceConnectionState === 'connected' ? 'success' : 'info');
+      };
+
+      peerConnection.onconnectionstatechange = () => {
+        log(`Peer Connection State: ${peerConnection.connectionState}`, peerConnection.connectionState === 'connected' ? 'success' : 'info');
       };
     }
 
