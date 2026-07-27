@@ -52,7 +52,6 @@ async def root():
             "register": "POST /api/register",
             "login": "POST /api/login",
             "users": "GET /api/users (Protected with Bearer JWT Token)",
-            "clear_users": "DELETE /api/admin/clear-users",
             "user_websocket": "WS /ws/user/{user_id}",
             "room_websocket": "WS /ws/{room_id}/{peer_id}",
             "test_client": "GET /test"
@@ -132,12 +131,6 @@ async def list_users(auth_header: HTTPAuthorizationCredentials = Depends(securit
     ]
     return UsersListResponse(users=user_list)
 
-@app.delete("/api/admin/clear-users")
-async def clear_users():
-    """Deletes all registered users from the database."""
-    database.clear_all_users()
-    return {"success": True, "message": "All registered users have been cleared from the database."}
-
 @app.get("/rooms")
 async def get_rooms():
     """Returns active rooms summary."""
@@ -212,9 +205,7 @@ async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
 
             elif msg_type in ["offer", "answer", "ice_candidate", "end_call"]:
                 if target_user_id:
-                    sent = await manager.send_to_user(target_user_id, data)
-                    if not sent:
-                        logger.warning(f"Could not send '{msg_type}' to target user '{target_user_id}'")
+                    await manager.send_to_user(target_user_id, data)
                 elif data.get("roomId"):
                     await manager.broadcast_to_room(data.get("roomId"), data, exclude_peer_id=user_id)
 
