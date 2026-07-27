@@ -43,13 +43,16 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATIC_DIR = os.path.join(BASE_DIR, "static")
 
 # --- TURN Server Configuration ---
-METERED_API_KEY = os.environ.get("METERED_API_KEY", "9O3NKMsFhnNbF5PWaFNOImTl3Zkox43toP-OunQsEU2091jE")
+METERED_API_KEY = os.environ.get("METERED_API_KEY", "")
 METERED_DOMAIN = os.environ.get("METERED_DOMAIN", "webrtctst")
 
-# Manual TURN fallback (pipe-separated for multiple URLs)
-TURN_URLS = os.environ.get("TURN_URLS", "")
-TURN_USERNAME = os.environ.get("TURN_USERNAME", "")
-TURN_CREDENTIAL = os.environ.get("TURN_CREDENTIAL", "")
+# Manual TURN fallback credentials
+TURN_URLS = os.environ.get(
+    "TURN_URLS",
+    "turn:global.relay.metered.ca:80|turn:global.relay.metered.ca:443|turns:global.relay.metered.ca:443?transport=tcp"
+)
+TURN_USERNAME = os.environ.get("TURN_USERNAME", "ab85ca30bd1c88d96c7aa7a9")
+TURN_CREDENTIAL = os.environ.get("TURN_CREDENTIAL", "6PcigSwg9cczPIan")
 
 _cached_metered_servers = None
 _cached_metered_timestamp = 0
@@ -67,6 +70,9 @@ async def _fetch_metered_turn_servers():
     """Fetch temporary TURN credentials from Metered.ca free API."""
     import time
     global _cached_metered_servers, _cached_metered_timestamp
+
+    if not METERED_API_KEY:
+        return []
 
     now = time.time()
     if _cached_metered_servers and (now - _cached_metered_timestamp) < 21600:
@@ -88,7 +94,7 @@ async def _fetch_metered_turn_servers():
 
 
 def _get_manual_turn_servers():
-    """Build TURN server list from manual environment variables."""
+    """Build TURN server list from environment variables or active credentials."""
     if not TURN_URLS or not TURN_USERNAME or not TURN_CREDENTIAL:
         return []
 
@@ -126,7 +132,7 @@ async def root():
 async def get_ice_servers():
     """
     Returns ICE server configuration (STUN + TURN) for WebRTC clients.
-    TURN servers are sourced from Metered.ca API or manual env vars.
+    TURN servers are sourced from Metered.ca API or active TURN credentials.
     """
     ice_servers = list(STUN_SERVERS)
 
@@ -139,11 +145,10 @@ async def get_ice_servers():
     manual_servers = _get_manual_turn_servers()
     if manual_servers:
         ice_servers.extend(manual_servers)
-        return {"iceServers": ice_servers, "source": "manual"}
+        return {"iceServers": ice_servers, "source": "metered_direct"}
 
     logger.warning(
-        "No TURN servers configured! Cross-network calls will fail. "
-        "Set METERED_API_KEY or TURN_URLS/TURN_USERNAME/TURN_CREDENTIAL env vars."
+        "No TURN servers configured! Cross-network calls will fail."
     )
     return {"iceServers": ice_servers, "source": "stun_only"}
 
