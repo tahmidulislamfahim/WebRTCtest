@@ -52,33 +52,10 @@ async def root():
             "register": "POST /api/register",
             "login": "POST /api/login",
             "users": "GET /api/users (Protected with Bearer JWT Token)",
-            "turn_credentials": "GET /api/turn-credentials",
             "user_websocket": "WS /ws/user/{user_id}",
             "room_websocket": "WS /ws/{room_id}/{peer_id}",
             "test_client": "GET /test"
         }
-    }
-
-@app.get("/api/turn-credentials")
-async def get_turn_credentials():
-    """
-    Returns ICE / TURN server configurations for WebRTC NAT traversal across cellular mobile data networks.
-    """
-    return {
-        "iceServers": [
-            {"urls": "stun:stun.l.google.com:19302"},
-            {"urls": "stun:stun1.l.google.com:19302"},
-            {"urls": "stun:stun2.l.google.com:19302"},
-            {"urls": "stun:stun3.l.google.com:19302"},
-            {"urls": "stun:stun4.l.google.com:19302"},
-            {"urls": "stun:stun.services.mozilla.com"},
-            {"urls": "stun:global.stun.twilio.com:3478"},
-            {"urls": "turn:openrelay.metered.ca:80", "username": "openrelay", "credential": "openrelay"},
-            {"urls": "turn:openrelay.metered.ca:443", "username": "openrelay", "credential": "openrelay"},
-            {"urls": "turn:openrelay.metered.ca:443?transport=tcp", "username": "openrelay", "credential": "openrelay"},
-            {"urls": "turns:openrelay.metered.ca:443?transport=tcp", "username": "openrelay", "credential": "openrelay"}
-        ],
-        "iceCandidatePoolSize": 10
     }
 
 @app.post("/api/register", response_model=AuthResponse)
@@ -228,9 +205,7 @@ async def user_websocket_endpoint(websocket: WebSocket, user_id: str):
 
             elif msg_type in ["offer", "answer", "ice_candidate", "end_call"]:
                 if target_user_id:
-                    sent = await manager.send_to_user(target_user_id, data)
-                    if not sent:
-                        logger.warning(f"Could not send '{msg_type}' to target user '{target_user_id}'. User offline or socket closed.")
+                    await manager.send_to_user(target_user_id, data)
                 elif data.get("roomId"):
                     await manager.broadcast_to_room(data.get("roomId"), data, exclude_peer_id=user_id)
 
